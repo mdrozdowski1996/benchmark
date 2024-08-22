@@ -21,6 +21,7 @@ from nltk import pos_tag
 
 MODEL_DIRECTORY = "model"
 SAMPLE_COUNT = 5
+BASELINE_AVERAGE = 2.58
 
 
 AVAILABLE_WORDS = [word for word, tag in pos_tag(words.words(), tagset='universal') if tag == "ADJ" or tag == "NOUN"]
@@ -47,6 +48,13 @@ class GenerationOutput:
     seed: int
     output: Tensor
     generation_time: float
+
+
+def calculate_score(model_average: float, similarity: float) -> float:
+    return max(
+        0.0,
+        BASELINE_AVERAGE - model_average
+    ) * similarity
 
 
 def generate(pipeline: StableDiffusionXLPipeline, prompt: str, seed: int):
@@ -157,6 +165,7 @@ def compare_checkpoints():
         f"Tested {i + 1} samples, "
         f"average similarity of {average_similarity}, "
         f"and speed of {average_time}"
+        f"with a final score of {calculate_score(average_time, average_similarity)}"
     )
 
 
