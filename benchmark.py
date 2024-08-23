@@ -75,6 +75,8 @@ def compare_checkpoints():
         torch_dtype=torch.float16,
     ).to("cuda")
 
+    baseline_pipeline(prompt="")
+
     print("Generating baseline samples to compare")
 
     baseline_outputs: list[GenerationOutput] = [
@@ -100,6 +102,8 @@ def compare_checkpoints():
         torch_dtype=torch.float16,
         use_safetensors=True,
     ).to("cuda")
+
+    pipeline(prompt="")
 
     i = 0
 
