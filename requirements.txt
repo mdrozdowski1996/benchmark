@@ -4,3 +4,4 @@ nltk==3.8.1
 transformers==4.41.2
 accelerate==0.31.0
 omegaconf==2.3.0
+pynvml~=11.5.3
