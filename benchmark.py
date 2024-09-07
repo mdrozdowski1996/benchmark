@@ -5,6 +5,13 @@ from pathlib import Path
 from random import sample, shuffle
 from time import perf_counter
 
+import oneflow as flow
+from onediff.infer_compiler import oneflow_compile
+
+from DeepCache import DeepCacheSDHelper
+
+from diffusers import AutoencoderKL, AutoencoderTiny
+
 import nltk
 import pynvml
 import torch
@@ -20,6 +27,9 @@ nltk.download('averaged_perceptron_tagger')
 
 from nltk.corpus import words
 from nltk import pos_tag
+
+import argparse
+
 
 BASELINE_REPOSITORY = "stablediffusionapi/newdream-sdxl-20"
 MODEL_CACHE_DIR = Path("model-cache")
@@ -83,6 +93,53 @@ def get_joules(device: torch.device):
     pynvml.nvmlShutdown()
     return mj / 1000.0  # convert mJ to J
 
+def callback_dynamic_cfg(pipe, step_index, timestep, callback_kwargs):
+  if step_index == int(pipe.num_timesteps * 0.5):
+    callback_kwargs['prompt_embeds'] = callback_kwargs['prompt_embeds'].chunk(2)[-1]
+    callback_kwargs['add_text_embeds'] = callback_kwargs['add_text_embeds'].chunk(2)[-1]
+    callback_kwargs['add_time_ids'] = callback_kwargs['add_time_ids'].chunk(2)[-1]
+    pipe._guidance_scale = 0.0
+
+  return callback_kwargs
+
+
+def create_optimized_pipeline(args):
+    if args.opt == "ONE_FLOW":
+        
+        
+        vae = AutoencoderTiny.from_pretrained(
+          'madebyollin/taesdxl',
+          use_safetensors=True,
+          torch_dtype=torch.float16,
+        ).to('cuda')
+
+        pipeline = StableDiffusionXLPipeline.from_pretrained(
+            "stablediffusionapi/newdream-sdxl-20",
+            torch_dtype=torch.float16,
+            vae=vae,
+            use_safetensors=True
+        ).to("cuda")
+
+        pipeline.unet = oneflow_compile(pipeline.unet)
+    elif args.opt == "DEEP_CACHE":
+        pipeline = StableDiffusionXLPipeline.from_pretrained(
+            "stablediffusionapi/newdream-sdxl-20",
+            torch_dtype=torch.float16,
+            use_safetensors=True
+        ).to("cuda")
+
+        helper = DeepCacheSDHelper(pipe=pipeline)
+        helper.set_params(cache_interval=3, cache_branch_id=0)
+        helper.enable()
+    else:
+        pipeline = StableDiffusionXLPipeline.from_pretrained(
+            "stablediffusionapi/newdream-sdxl-20",
+            torch_dtype=torch.float16,
+            use_safetensors=True
+        ).to("cuda") 
+    
+    return pipeline
+
 
 def generate(pipeline: StableDiffusionXLPipeline, prompt: str, seed: int):
     start_joules = get_joules(pipeline.device)
@@ -110,8 +167,14 @@ def generate(pipeline: StableDiffusionXLPipeline, prompt: str, seed: int):
         watts_used=watts_used,
     )
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Options for Stable Diffusion XL Txt2Img Demo", conflict_handler='resolve')
+    parser.add_argument('--opt', type=str, default="ONE_FLOW", choices=["ONE_FLOW", "DEEP_CACHE", "NONE"], help="Optimization method")
+    
+    return parser.parse_args()
+    
 
-def compare_checkpoints():
+def compare_checkpoints(args):
     baseline_pipeline = StableDiffusionXLPipeline.from_pretrained(
         BASELINE_REPOSITORY,
         torch_dtype=torch.float16,
@@ -143,32 +206,52 @@ def compare_checkpoints():
     average_time = float("inf")
     average_similarity = 1.0
 
-    pipeline = StableDiffusionXLPipeline.from_pretrained(
+    '''pipeline = StableDiffusionXLPipeline.from_pretrained(
         MODEL_DIRECTORY,
         torch_dtype=torch.float16,
         use_safetensors=True,
-    ).to("cuda")
+    ).to("cuda")'''
 
-    pipeline(prompt="")
+    pipeline = create_optimized_pipeline(args)
+
+    if args.opt == "ONE_FLOW":
+        with flow.autocast('cuda'):
+            pipeline("")
 
     size = get_model_size()
     vram_used = 0.0
     watts_used = 0.0
 
     i = 0
-
     # Take {SAMPLE_COUNT} samples, keeping track of how fast/accurate generations have been
     for i, baseline in enumerate(baseline_outputs):
         print(f"Sample {i}, prompt {baseline.prompt} and seed {baseline.seed}")
 
         generated = i
         remaining = SAMPLE_COUNT - generated
-
-        generation = generate(
-            pipeline,
-            baseline.prompt,
-            baseline.seed,
-        )
+        if args.opt == "ONE_FLOW":
+            with flow.autocast('cuda'):
+                generation = generate(
+                    pipeline,
+                    baseline.prompt,
+                    baseline.seed,
+                )
+        elif args.opt == "DEEP_CACHE":
+            helper = DeepCacheSDHelper(pipe=pipeline)
+            helper.set_params(cache_interval=3, cache_branch_id=0)
+            helper.enable()
+            generation = generate(
+                pipeline,
+                baseline.prompt,
+                baseline.seed,
+            )
+            helper.disable()
+        else:
+            generation = generate(
+                pipeline,
+                baseline.prompt,
+                baseline.seed,
+            )
 
         similarity = (cosine_similarity(
             baseline.output.flatten(),
@@ -184,6 +267,7 @@ def compare_checkpoints():
             f"and VRAM usage of {generation.vram_used}, "
             f"and watts usage of {generation.watts_used}."
         )
+        
 
         if generated:
             average_time = (average_time * generated + generation.generation_time) / (generated + 1)
@@ -233,4 +317,5 @@ def compare_checkpoints():
 
 
 if __name__ == '__main__':
-    compare_checkpoints()
+    args = parse_args()
+    compare_checkpoints(args)

@@ -1,7 +1,11 @@
-torch==2.2.0
-diffusers==0.29.0
+torch==2.4.1
+torchvision==0.19.1
+diffusers==0.28.0
 nltk==3.8.1
-transformers==4.41.2
-accelerate==0.31.0
-omegaconf==2.3.0
+transformers==4.44.2
+accelerate==0.21.0
+omegaconf==2.2.3
 pynvml~=11.5.3
+onediff==1.2.0
+oneflow==0.9.1.dev20240802+cu118
+DeepCache==0.1.1
