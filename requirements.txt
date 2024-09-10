@@ -1,11 +1,12 @@
-torch==2.4.1
-torchvision==0.19.1
+torch==2.1.2
+torchvision==0.16.1
+cuda-python
+nvidia-pyindex==1.0.9
+nvidia-cudnn==8.2.0.51
 diffusers==0.28.0
 nltk==3.8.1
 transformers==4.44.2
 accelerate==0.21.0
 omegaconf==2.2.3
 pynvml~=11.5.3
-onediff==1.2.0
-oneflow==0.9.1.dev20240802+cu118
-DeepCache==0.1.1
+deepcache==0.1.1
